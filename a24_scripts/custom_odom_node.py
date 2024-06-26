@@ -9,6 +9,7 @@ import math
 WHEEL_BASE = 0.226  # Distance between the wheels
 TICKS_PER_REVOLUTION = 987  # Adjust this based on your encoder specification
 WHEEL_RADIUS = 0.035  # Adjust this based on your wheel size
+COUNTS_THRESHOLD = 5  # Number of counts to average over
 
 class OdometryNode(Node):
     def __init__(self):
@@ -24,6 +25,8 @@ class OdometryNode(Node):
 
         self.last_left_encoder = 0
         self.last_right_encoder = 0
+        self.left_count = 0
+        self.right_count = 0
         self.x = 0.0
         self.y = 0.0
         self.theta = 0.0
@@ -38,58 +41,66 @@ class OdometryNode(Node):
         delta_left = left_encoder - self.last_left_encoder
         delta_right = right_encoder - self.last_right_encoder
 
-        self.last_left_encoder = left_encoder
-        self.last_right_encoder = right_encoder
+        self.left_count += abs(delta_left)
+        self.right_count += abs(delta_right)
 
-        delta_left_distance = (delta_left / TICKS_PER_REVOLUTION) * (2 * math.pi * WHEEL_RADIUS)
-        delta_right_distance = (delta_right / TICKS_PER_REVOLUTION) * (2 * math.pi * WHEEL_RADIUS)
-        
-        delta_distance = (delta_left_distance + delta_right_distance) / 2.0
-        delta_theta = (delta_right_distance - delta_left_distance) / WHEEL_BASE
+        if self.left_count >= COUNTS_THRESHOLD or self.right_count >= COUNTS_THRESHOLD:
+            self.last_left_encoder = left_encoder
+            self.last_right_encoder = right_encoder
 
-        self.x += delta_distance * math.cos(self.theta + delta_theta / 2.0)
-        self.y += delta_distance * math.sin(self.theta + delta_theta / 2.0)
-        self.theta += delta_theta
+            delta_left_distance = (delta_left / TICKS_PER_REVOLUTION) * (2 * math.pi * WHEEL_RADIUS)
+            delta_right_distance = (delta_right / TICKS_PER_REVOLUTION) * (2 * math.pi * WHEEL_RADIUS)
+            
+            delta_distance = (delta_left_distance + delta_right_distance) / 2.0
+            delta_theta = (delta_right_distance - delta_left_distance) / WHEEL_BASE
 
-        # Normalize theta to be within the range -pi to pi
-        self.theta = (self.theta + math.pi) % (2 * math.pi) - math.pi
+            self.x += delta_distance * math.cos(self.theta + delta_theta / 2.0)
+            self.y += delta_distance * math.sin(self.theta + delta_theta / 2.0)
+            self.theta += delta_theta
 
-        # Create quaternion from yaw
-        odom_quat = self.create_quaternion_from_yaw(self.theta)
+            # Normalize theta to be within the range -pi to pi
+            self.theta = (self.theta + math.pi) % (2 * math.pi) - math.pi
 
-        #find odom twist
-        time_now = self.get_clock().now().nanoseconds
-        delta_time = abs(time_now - self.last_time_nsec)/(10**9)
-        if delta_time > 0:
-            self.lin_x = delta_distance/delta_time
-            self.ang_z = delta_theta/delta_time
-        self.last_time_nsec = time_now
+            # Create quaternion from yaw
+            odom_quat = self.create_quaternion_from_yaw(self.theta)
 
-        # Publish odometry
-        odom = Odometry()
-        odom.header.stamp = self.get_clock().now().to_msg()
-        odom.header.frame_id = 'odom'
-        odom.child_frame_id = 'base_footprint'
-        odom.pose.pose.position.x = self.x
-        odom.pose.pose.position.y = self.y
-        odom.pose.pose.position.z = 0.0
-        odom.pose.pose.orientation = odom_quat
-        odom.twist.twist.linear.x = self.lin_x
-        odom.twist.twist.angular.z = self.ang_z
+            #find odom twist
+            time_now = self.get_clock().now().nanoseconds
+            delta_time = abs(time_now - self.last_time_nsec) / (10**9)
+            if delta_time > 0:
+                self.lin_x = delta_distance / delta_time
+                self.ang_z = delta_theta / delta_time
+            self.last_time_nsec = time_now
 
-        self.odom_pub.publish(odom)
+            # Publish odometry
+            odom = Odometry()
+            odom.header.stamp = self.get_clock().now().to_msg()
+            odom.header.frame_id = 'odom'
+            odom.child_frame_id = 'base_footprint'
+            odom.pose.pose.position.x = self.x
+            odom.pose.pose.position.y = self.y
+            odom.pose.pose.position.z = 0.0
+            odom.pose.pose.orientation = odom_quat
+            odom.twist.twist.linear.x = self.lin_x
+            odom.twist.twist.angular.z = self.ang_z
 
-        # Broadcast TF
-        t = TransformStamped()
-        t.header.stamp = self.get_clock().now().to_msg()
-        t.header.frame_id = 'odom'
-        t.child_frame_id = 'base_footprint'
-        t.transform.translation.x = self.x
-        t.transform.translation.y = self.y
-        t.transform.translation.z = 0.0
-        t.transform.rotation = odom_quat
+            self.odom_pub.publish(odom)
 
-        self.tf_broadcaster.sendTransform(t)
+            # Broadcast TF
+            t = TransformStamped()
+            t.header.stamp = self.get_clock().now().to_msg()
+            t.header.frame_id = 'odom'
+            t.child_frame_id = 'base_footprint'
+            t.transform.translation.x = self.x
+            t.transform.translation.y = self.y
+            t.transform.translation.z = 0.0
+            t.transform.rotation = odom_quat
+
+            self.tf_broadcaster.sendTransform(t)
+
+            # Reset counts
+            self.left_count = 0
+            self.right_count = 0
 
     def create_quaternion_from_yaw(self, yaw):
         quat = TransformStamped().transform.rotation
