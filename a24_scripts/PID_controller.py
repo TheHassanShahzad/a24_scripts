@@ -4,7 +4,7 @@ import rclpy
 from rclpy.node import Node
 from geometry_msgs.msg import Twist
 from nav_msgs.msg import Odometry
-from std_msgs.msg import Int64MultiArray
+from std_msgs.msg import Int16MultiArray
 import numpy as np
 
 class PIDControllerNode(Node):
@@ -40,7 +40,7 @@ class PIDControllerNode(Node):
         self.max_pwm = 255
 
         # Publisher for PWM data
-        self.pwm_pub = self.create_publisher(Int64MultiArray, '/pwm_data', 10)
+        self.pwm_pub = self.create_publisher(Int16MultiArray, '/pwm_data', 10)
 
         # Subscriber to cmd_vel
         self.cmd_vel_sub = self.create_subscription(
@@ -78,7 +78,7 @@ class PIDControllerNode(Node):
         left_wheel_pwm = self.pid_control(self.left_wheel_error, self.left_wheel_integral, self.left_wheel_prev_error)
 
         # print(right_wheel_pwm, left_wheel_pwm)
-        pwm_msg = Int64MultiArray()
+        pwm_msg = Int16MultiArray()
         pwm_msg.data = [int(right_wheel_pwm), int(left_wheel_pwm)]
         self.pwm_pub.publish(pwm_msg)
 
