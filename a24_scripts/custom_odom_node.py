@@ -27,7 +27,9 @@ class OdometryNode(Node):
         self.x = 0.0
         self.y = 0.0
         self.theta = 0.0
-        self.last_time = self.get_clock().now()
+        self.last_time_nsec = self.get_clock().now().nanoseconds
+        self.lin_x = 0.0
+        self.ang_z = 0.0
 
     def encoder_callback(self, msg):
         right_encoder = msg.data[0]  # First element is the right wheel encoder count
@@ -55,6 +57,14 @@ class OdometryNode(Node):
         # Create quaternion from yaw
         odom_quat = self.create_quaternion_from_yaw(self.theta)
 
+        #find odom twist
+        time_now = self.get_clock().now().nanoseconds
+        delta_time = abs(time_now - self.last_time_nsec)/(10**9)
+        if delta_time > 0:
+            self.lin_x = delta_distance/delta_time
+            self.ang_z = delta_theta/delta_time
+        self.last_time_nsec = time_now
+
         # Publish odometry
         odom = Odometry()
         odom.header.stamp = self.get_clock().now().to_msg()
@@ -64,6 +74,8 @@ class OdometryNode(Node):
         odom.pose.pose.position.y = self.y
         odom.pose.pose.position.z = 0.0
         odom.pose.pose.orientation = odom_quat
+        odom.twist.twist.linear.x = self.lin_x
+        odom.twist.twist.angular.z = self.ang_z
 
         self.odom_pub.publish(odom)
 
