@@ -10,7 +10,8 @@ setup(
         ('share/ament_index/resource_index/packages',
             ['resource/' + package_name]),
         ('share/' + package_name, ['package.xml']),
-        ('share/' + package_name + '/launch', ['launch/real_robot_setup.launch.py'])
+        ('share/' + package_name + '/launch', ['launch/closed_real_robot_setup.launch.py']),
+        ('share/' + package_name + '/launch', ['launch/open_real_robot_setup.launch.py'])
     ],
     install_requires=['setuptools'],
     zip_safe=True,
@@ -23,7 +24,8 @@ setup(
         'console_scripts': [
             'odom_publisher = a24_scripts.custom_odom_node:main',
             'pid_controller = a24_scripts.PID_controller:main',
-            'tf_publisher = a24_scripts.tf_publisher:main'
+            'tf_publisher = a24_scripts.tf_publisher:main',
+            'open_loop_controller = a24_scripts.open_loop_controller:main'
         ],
     },
 )
