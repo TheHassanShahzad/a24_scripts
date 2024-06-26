@@ -1,134 +1,96 @@
 import rclpy
 from rclpy.node import Node
-from std_msgs.msg import Int64MultiArray
 from nav_msgs.msg import Odometry
-from geometry_msgs.msg import Pose, Twist, Point, Quaternion, Vector3
-from math import pi, sin, cos
+from geometry_msgs.msg import TransformStamped
+from std_msgs.msg import Int64MultiArray
+import tf2_ros
+import math
 
-class EncoderToOdomNode(Node):
+WHEEL_BASE = 0.226  # Distance between the wheels
+TICKS_PER_REVOLUTION = 987  # Adjust this based on your encoder specification
+WHEEL_RADIUS = 0.035  # Adjust this based on your wheel size
+
+class OdometryNode(Node):
     def __init__(self):
-        super().__init__('encoder_to_odom_node')
-        # Define constants and initial values
-        self.wheel_diameter = 0.07
-        self.wheel_spacing = 0.226
-        self.counts_per_rev = 987
+        super().__init__('odometry_node')
+        self.odom_pub = self.create_publisher(Odometry, 'odom', 50)
+        self.tf_broadcaster = tf2_ros.TransformBroadcaster(self)
 
-        self.right_encoder_counts = 0
-        self.left_encoder_counts = 0
-        self.right_wheel_displacement = 0
-        self.left_wheel_displacement = 0
-
-        self.pose_pos_x = 0.0
-        self.pose_pos_y = 0.0
-        self.pose_pos_z = 0.0
-        self.pose_ori_x = 0.0
-        self.pose_ori_y = 0.0
-        self.pose_ori_z = 0.0
-        self.pose_ori_w = 1.0
-        self.twist_lin_x = 0.0
-        self.twist_ang_z = 0.0
-
-        self.euler_theta = 0.0
-
-        self.old_time = 0
-        self.current_time = 0
-        self.old_right_wheel_displacement = 0
-        self.old_left_wheel_displacement = 0
-        self.old_euler_theta = 0
-
-        self.subscription = self.create_subscription(
-            Int64MultiArray,
-            '/encoder_data',
+        self.encoder_sub = self.create_subscription(
+            Int64MultiArray,  # Subscribing to Int64MultiArray type
+            'encoder_data',  # The topic name is 'encoder_counts'
             self.encoder_callback,
             10)
-        self.publisher = self.create_publisher(Odometry, '/odom', 10)
-        
-        # Setting up the Odometry message
-        self.odom_msg = Odometry()
-        self.odom_msg.header.frame_id = 'odom'
-        self.odom_msg.child_frame_id = 'base_footprint'
 
-        # Setting initial pose and twist values
-        self.odom_msg.pose.pose = Pose(
-            position=Point(x=0.0, y=0.0, z=0.0),
-            orientation=Quaternion(x=0.0, y=0.0, z=0.0, w=1.0)
-        )
-        self.odom_msg.twist.twist = Twist(
-            linear=Vector3(x=0.0, y=0.0, z=0.0),
-            angular=Vector3(x=0.0, y=0.0, z=0.0)
-        )
+        self.last_left_encoder = 0
+        self.last_right_encoder = 0
+        self.x = 0.0
+        self.y = 0.0
+        self.theta = 0.0
+        self.last_time = self.get_clock().now()
 
     def encoder_callback(self, msg):
-        # For now, we are not using the encoder data, just publishing a simple odom message
-        # self.get_logger().info(f'Received encoder data: {msg.data}')
-        self.right_encoder_counts, self.left_encoder_counts = msg.data
-        self.right_wheel_displacement, self.left_wheel_displacement = self.get_wheels_displacement(self.wheel_diameter, self.counts_per_rev, self.right_encoder_counts, self.left_encoder_counts)
+        right_encoder = msg.data[0]  # First element is the right wheel encoder count
+        left_encoder = msg.data[1]  # Second element is the left wheel encoder count
 
-        # get x, y position of robot and how much it has rotated about z axis
-        self.get_robot_position(self.wheel_spacing, self.right_wheel_displacement, self.left_wheel_displacement)
-        # print(self.pose_pos_x, self.pose_pos_y, self.euler_theta)
+        delta_left = left_encoder - self.last_left_encoder
+        delta_right = right_encoder - self.last_right_encoder
 
-        self.pose_ori_z = self.get_quaternion(self.euler_theta)[2]
-        self.pose_ori_w = self.get_quaternion(self.euler_theta)[3]
+        self.last_left_encoder = left_encoder
+        self.last_right_encoder = right_encoder
 
-        self.current_time = (self.get_clock().now().to_msg().sec*(10**9))+self.get_clock().now().to_msg().nanosec
+        delta_left_distance = (delta_left / TICKS_PER_REVOLUTION) * (2 * math.pi * WHEEL_RADIUS)
+        delta_right_distance = (delta_right / TICKS_PER_REVOLUTION) * (2 * math.pi * WHEEL_RADIUS)
+        
+        delta_distance = (delta_left_distance + delta_right_distance) / 2.0
+        delta_theta = (delta_right_distance - delta_left_distance) / WHEEL_BASE
 
-        d_time = (self.current_time - self.old_time)/(10**9)
-        # print(d_time)
-        if d_time != self.current_time:
-            d_right_wheel_displacement = self.right_wheel_displacement - self.old_right_wheel_displacement
-            d_left_wheel_displacement= self.left_wheel_displacement - self.old_left_wheel_displacement
-            d_euler_theta = self.euler_theta - self.old_euler_theta
+        self.x += delta_distance * math.cos(self.theta + delta_theta / 2.0)
+        self.y += delta_distance * math.sin(self.theta + delta_theta / 2.0)
+        self.theta += delta_theta
 
-            right_wheel_velocity = d_right_wheel_displacement/d_time
-            left_wheel_velociy = d_left_wheel_displacement/d_time
+        # Normalize theta to be within the range -pi to pi
+        self.theta = (self.theta + math.pi) % (2 * math.pi) - math.pi
 
-            self.twist_lin_x = (right_wheel_velocity + left_wheel_velociy)/2
-            self.twist_ang_z = d_euler_theta/d_time
+        # Create quaternion from yaw
+        odom_quat = self.create_quaternion_from_yaw(self.theta)
 
-        self.old_time = self.current_time
-        self.old_right_wheel_displacement = self.right_wheel_displacement
-        self.old_left_wheel_displacement = self.left_wheel_displacement
-        self.old_euler_theta = self.euler_theta
+        # Publish odometry
+        odom = Odometry()
+        odom.header.stamp = self.get_clock().now().to_msg()
+        odom.header.frame_id = 'odom'
+        odom.child_frame_id = 'base_footprint'
+        odom.pose.pose.position.x = self.x
+        odom.pose.pose.position.y = self.y
+        odom.pose.pose.position.z = 0.0
+        odom.pose.pose.orientation = odom_quat
 
-        #updating odom
-        self.odom_msg.header.stamp = self.get_clock().now().to_msg()
-        self.odom_msg.pose.pose = Pose(
-            position=Point(x=self.pose_pos_x, y=self.pose_pos_y, z=self.pose_pos_z),
-            orientation=Quaternion(x=self.pose_ori_x, y=self.pose_ori_y, z=self.pose_ori_z, w=self.pose_ori_w)
-        )
-        self.odom_msg.twist.twist = Twist(
-            linear=Vector3(x=self.twist_lin_x, y=0.0, z=0.0),
-            angular=Vector3(x=0.0, y=0.0, z=self.twist_ang_z)
-        )
+        self.odom_pub.publish(odom)
 
-        # Publish the odom message
-        self.publisher.publish(self.odom_msg)
+        # Broadcast TF
+        t = TransformStamped()
+        t.header.stamp = self.get_clock().now().to_msg()
+        t.header.frame_id = 'odom'
+        t.child_frame_id = 'base_footprint'
+        t.transform.translation.x = self.x
+        t.transform.translation.y = self.y
+        t.transform.translation.z = 0.0
+        t.transform.rotation = odom_quat
 
-    def get_wheels_displacement(self, wheel_diameter, counts_per_rev, right_encoder_counts, left_encoder_counts):
-        right_wheel_displacement= (wheel_diameter/2)*((right_encoder_counts/counts_per_rev)*(2*pi))
-        left_wheel_displacement = (wheel_diameter/2)*((left_encoder_counts/counts_per_rev)*(2*pi))
+        self.tf_broadcaster.sendTransform(t)
 
-        return [right_wheel_displacement, left_wheel_displacement]
-    
-    def get_robot_position(self, wheel_spacing, right_wheel_displacement, left_wheel_displacement):
-        dc = (right_wheel_displacement+left_wheel_displacement)/2
-        theta = (right_wheel_displacement - left_wheel_displacement)/wheel_spacing
-        x_coord = dc*cos(theta)
-        y_coord = dc*sin(theta)
+    def create_quaternion_from_yaw(self, yaw):
+        quat = TransformStamped().transform.rotation
+        quat.z = math.sin(yaw / 2.0)
+        quat.w = math.cos(yaw / 2.0)
+        return quat
 
-        self.pose_pos_x, self.pose_pos_y, self.euler_theta = [x_coord, y_coord, theta]
-
-    def get_quaternion(self, euler_theta):
-        return [0, 0, sin(euler_theta/2), cos(euler_theta/2)]
-    
 def main(args=None):
     rclpy.init(args=args)
-    node = EncoderToOdomNode()
+    node = OdometryNode()
     rclpy.spin(node)
     node.destroy_node()
     rclpy.shutdown()
-
 
 if __name__ == '__main__':
     main()
