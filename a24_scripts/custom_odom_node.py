@@ -9,7 +9,7 @@ import math
 WHEEL_BASE = 0.226  # Distance between the wheels
 TICKS_PER_REVOLUTION = 987  # Adjust this based on your encoder specification
 WHEEL_RADIUS = 0.035  # Adjust this based on your wheel size
-COUNTS_THRESHOLD = 5  # Number of counts to average over
+ENCODER_THRESHOLD = 5  # Encoder counts threshold for velocity update
 
 class OdometryNode(Node):
     def __init__(self):
@@ -25,14 +25,47 @@ class OdometryNode(Node):
 
         self.last_left_encoder = 0
         self.last_right_encoder = 0
-        self.left_count = 0
-        self.right_count = 0
         self.x = 0.0
         self.y = 0.0
         self.theta = 0.0
         self.last_time_nsec = self.get_clock().now().nanoseconds
         self.lin_x = 0.0
         self.ang_z = 0.0
+
+        self.accumulated_left_encoder = 0
+        self.accumulated_right_encoder = 0
+        self.initial_odom_published = False
+
+        # Publish initial null odometry
+        self.publish_null_odometry()
+
+    def publish_null_odometry(self):
+        odom = Odometry()
+        odom.header.stamp = self.get_clock().now().to_msg()
+        odom.header.frame_id = 'odom'
+        odom.child_frame_id = 'base_footprint'
+        odom.pose.pose.position.x = 0.0
+        odom.pose.pose.position.y = 0.0
+        odom.pose.pose.position.z = 0.0
+        odom.pose.pose.orientation = self.create_quaternion_from_yaw(0.0)
+        odom.twist.twist.linear.x = 0.0
+        odom.twist.twist.angular.z = 0.0
+
+        self.odom_pub.publish(odom)
+
+        # Broadcast TF
+        t = TransformStamped()
+        t.header.stamp = self.get_clock().now().to_msg()
+        t.header.frame_id = 'odom'
+        t.child_frame_id = 'base_footprint'
+        t.transform.translation.x = 0.0
+        t.transform.translation.y = 0.0
+        t.transform.translation.z = 0.0
+        t.transform.rotation = self.create_quaternion_from_yaw(0.0)
+
+        self.tf_broadcaster.sendTransform(t)
+
+        self.initial_odom_published = True
 
     def encoder_callback(self, msg):
         right_encoder = msg.data[0]  # First element is the right wheel encoder count
@@ -41,15 +74,12 @@ class OdometryNode(Node):
         delta_left = left_encoder - self.last_left_encoder
         delta_right = right_encoder - self.last_right_encoder
 
-        self.left_count += abs(delta_left)
-        self.right_count += abs(delta_right)
+        self.accumulated_left_encoder += delta_left
+        self.accumulated_right_encoder += delta_right
 
-        if self.left_count >= COUNTS_THRESHOLD or self.right_count >= COUNTS_THRESHOLD:
-            self.last_left_encoder = left_encoder
-            self.last_right_encoder = right_encoder
-
-            delta_left_distance = (delta_left / TICKS_PER_REVOLUTION) * (2 * math.pi * WHEEL_RADIUS)
-            delta_right_distance = (delta_right / TICKS_PER_REVOLUTION) * (2 * math.pi * WHEEL_RADIUS)
+        if abs(self.accumulated_left_encoder) >= ENCODER_THRESHOLD or abs(self.accumulated_right_encoder) >= ENCODER_THRESHOLD:
+            delta_left_distance = (self.accumulated_left_encoder / TICKS_PER_REVOLUTION) * (2 * math.pi * WHEEL_RADIUS)
+            delta_right_distance = (self.accumulated_right_encoder / TICKS_PER_REVOLUTION) * (2 * math.pi * WHEEL_RADIUS)
             
             delta_distance = (delta_left_distance + delta_right_distance) / 2.0
             delta_theta = (delta_right_distance - delta_left_distance) / WHEEL_BASE
@@ -64,7 +94,7 @@ class OdometryNode(Node):
             # Create quaternion from yaw
             odom_quat = self.create_quaternion_from_yaw(self.theta)
 
-            #find odom twist
+            # Find odom twist
             time_now = self.get_clock().now().nanoseconds
             delta_time = abs(time_now - self.last_time_nsec) / (10**9)
             if delta_time > 0:
@@ -98,9 +128,12 @@ class OdometryNode(Node):
 
             self.tf_broadcaster.sendTransform(t)
 
-            # Reset counts
-            self.left_count = 0
-            self.right_count = 0
+            # Reset accumulated encoders
+            self.accumulated_left_encoder = 0
+            self.accumulated_right_encoder = 0
+
+        self.last_left_encoder = left_encoder
+        self.last_right_encoder = right_encoder
 
     def create_quaternion_from_yaw(self, yaw):
         quat = TransformStamped().transform.rotation
