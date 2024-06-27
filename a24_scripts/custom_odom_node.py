@@ -10,6 +10,7 @@ WHEEL_BASE = 0.226  # Distance between the wheels
 TICKS_PER_REVOLUTION = 987  # Adjust this based on your encoder specification
 WHEEL_RADIUS = 0.035  # Adjust this based on your wheel size
 ENCODER_THRESHOLD = 5  # Encoder counts threshold for velocity update
+PUBLISH_INTERVAL = 0.1  # Publish interval in seconds
 
 class OdometryNode(Node):
     def __init__(self):
@@ -23,6 +24,8 @@ class OdometryNode(Node):
             self.encoder_callback,
             10)
 
+        self.timer = self.create_timer(PUBLISH_INTERVAL, self.publish_odometry)
+
         self.last_left_encoder = 0
         self.last_right_encoder = 0
         self.x = 0.0
@@ -34,22 +37,21 @@ class OdometryNode(Node):
 
         self.accumulated_left_encoder = 0
         self.accumulated_right_encoder = 0
-        self.initial_odom_published = False
 
-        # Publish initial null odometry
-        self.publish_null_odometry()
+    def publish_odometry(self):
+        odom_quat = self.create_quaternion_from_yaw(self.theta)
 
-    def publish_null_odometry(self):
+        # Publish odometry
         odom = Odometry()
         odom.header.stamp = self.get_clock().now().to_msg()
         odom.header.frame_id = 'odom'
         odom.child_frame_id = 'base_footprint'
-        odom.pose.pose.position.x = 0.0
-        odom.pose.pose.position.y = 0.0
+        odom.pose.pose.position.x = self.x
+        odom.pose.pose.position.y = self.y
         odom.pose.pose.position.z = 0.0
-        odom.pose.pose.orientation = self.create_quaternion_from_yaw(0.0)
-        odom.twist.twist.linear.x = 0.0
-        odom.twist.twist.angular.z = 0.0
+        odom.pose.pose.orientation = odom_quat
+        odom.twist.twist.linear.x = self.lin_x
+        odom.twist.twist.angular.z = self.ang_z
 
         self.odom_pub.publish(odom)
 
@@ -58,14 +60,12 @@ class OdometryNode(Node):
         t.header.stamp = self.get_clock().now().to_msg()
         t.header.frame_id = 'odom'
         t.child_frame_id = 'base_footprint'
-        t.transform.translation.x = 0.0
-        t.transform.translation.y = 0.0
+        t.transform.translation.x = self.x
+        t.transform.translation.y = self.y
         t.transform.translation.z = 0.0
-        t.transform.rotation = self.create_quaternion_from_yaw(0.0)
+        t.transform.rotation = odom_quat
 
         self.tf_broadcaster.sendTransform(t)
-
-        self.initial_odom_published = True
 
     def encoder_callback(self, msg):
         right_encoder = msg.data[0]  # First element is the right wheel encoder count
@@ -91,9 +91,6 @@ class OdometryNode(Node):
             # Normalize theta to be within the range -pi to pi
             self.theta = (self.theta + math.pi) % (2 * math.pi) - math.pi
 
-            # Create quaternion from yaw
-            odom_quat = self.create_quaternion_from_yaw(self.theta)
-
             # Find odom twist
             time_now = self.get_clock().now().nanoseconds
             delta_time = abs(time_now - self.last_time_nsec) / (10**9)
@@ -101,32 +98,6 @@ class OdometryNode(Node):
                 self.lin_x = delta_distance / delta_time
                 self.ang_z = delta_theta / delta_time
             self.last_time_nsec = time_now
-
-            # Publish odometry
-            odom = Odometry()
-            odom.header.stamp = self.get_clock().now().to_msg()
-            odom.header.frame_id = 'odom'
-            odom.child_frame_id = 'base_footprint'
-            odom.pose.pose.position.x = self.x
-            odom.pose.pose.position.y = self.y
-            odom.pose.pose.position.z = 0.0
-            odom.pose.pose.orientation = odom_quat
-            odom.twist.twist.linear.x = self.lin_x
-            odom.twist.twist.angular.z = self.ang_z
-
-            self.odom_pub.publish(odom)
-
-            # Broadcast TF
-            t = TransformStamped()
-            t.header.stamp = self.get_clock().now().to_msg()
-            t.header.frame_id = 'odom'
-            t.child_frame_id = 'base_footprint'
-            t.transform.translation.x = self.x
-            t.transform.translation.y = self.y
-            t.transform.translation.z = 0.0
-            t.transform.rotation = odom_quat
-
-            self.tf_broadcaster.sendTransform(t)
 
             # Reset accumulated encoders
             self.accumulated_left_encoder = 0
