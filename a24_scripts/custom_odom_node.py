@@ -7,10 +7,10 @@ import tf2_ros
 import math
 
 WHEEL_BASE = 0.226  # Distance between the wheels
-TICKS_PER_REVOLUTION = 987  # Adjust this based on your encoder specification
+TICKS_PER_REVOLUTION = 990  # Adjust this based on your encoder specification
 WHEEL_RADIUS = 0.035  # Adjust this based on your wheel size
 ENCODER_THRESHOLD = 5  # Encoder counts threshold for velocity update
-PUBLISH_INTERVAL = 0.1  # Publish interval in seconds
+PUBLISH_INTERVAL = 0.001  # Publish interval in seconds
 
 class OdometryNode(Node):
     def __init__(self):

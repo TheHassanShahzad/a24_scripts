@@ -43,20 +43,31 @@ class CmdVelToPWMNode(Node):
         self.linear_x = msg.linear.x
         self.angular_z = msg.angular.z
 
-        self.get_wheel_vels(self.linear_x, self.angular_z, self.wheel_spacing)
+        
+        # if (self.right_wheel_vel > self.max_motor_linear_vel or self.left_wheel_vel > self.max_motor_linear_vel):
+        #     if self.right_wheel_vel >= self.right_wheel_vel:
+        #         scale_factor = self.max_motor_linear_vel/self.right_wheel_vel
+        #     else:
+        #         scale_factor = self.max_motor_linear_vel/self.left_wheel_vel
+
+        #     new_linear_x = scale_factor*self.linear_x
+        #     new_angular_z = scale_factor*self.angular_z
+
+        #     self.get_wheel_vels(new_linear_x, new_angular_z, self.wheel_spacing)
 
         if (self.right_wheel_vel > self.max_motor_linear_vel or self.left_wheel_vel > self.max_motor_linear_vel):
-            if self.right_wheel_vel >= self.right_wheel_vel:
+            if self.right_wheel_vel > self.max_motor_linear_vel:
+                self.right_wheel_vel = self.max_motor_linear_vel
                 scale_factor = self.max_motor_linear_vel/self.right_wheel_vel
+                self.left_wheel_vel *= scale_factor
             else:
+                self.left_wheel_vel = self.max_motor_linear_vel
                 scale_factor = self.max_motor_linear_vel/self.left_wheel_vel
-
-            new_linear_x = scale_factor*self.linear_x
-            new_angular_z = scale_factor*self.angular_z
-
-            self.get_wheel_vels(new_linear_x, new_angular_z, self.wheel_spacing)
+                self.right_wheel_vel *= scale_factor
             
-        print(self.right_wheel_vel, self.left_wheel_vel)
+        self.get_wheel_vels(self.linear_x, self.angular_z, self.wheel_spacing)
+            
+        # print(self.right_wheel_vel, self.left_wheel_vel)
         self.get_PWM(self.right_wheel_vel, self.left_wheel_vel, self.max_motor_linear_vel)
 
         # Publish PWM values
