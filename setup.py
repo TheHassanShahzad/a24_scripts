@@ -11,7 +11,9 @@ setup(
             ['resource/' + package_name]),
         ('share/' + package_name, ['package.xml']),
         ('share/' + package_name + '/launch', ['launch/closed_real_robot_setup.launch.py']),
-        ('share/' + package_name + '/launch', ['launch/open_real_robot_setup.launch.py'])
+        ('share/' + package_name + '/launch', ['launch/open_real_robot_setup.launch.py']),
+        ('share/' + package_name + '/launch', ['launch/a24_setup.launch.py'])
+
     ],
     install_requires=['setuptools'],
     zip_safe=True,
